@@ -21,13 +21,14 @@ import org.geotools.coverage.grid.GridCoverage2D;
 import org.geotools.coverage.grid.io.imageio.geotiff.GeoTiffException;
 import org.geotools.referencing.CRS;
 import org.joml.Vector2d;
-import org.opengis.referencing.FactoryException;
-import org.opengis.referencing.crs.CoordinateReferenceSystem;
-import org.opengis.referencing.crs.GeographicCRS;
-import org.opengis.referencing.crs.ProjectedCRS;
-import org.opengis.referencing.operation.TransformException;
+import org.geotools.api.referencing.FactoryException;
+import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
+import org.geotools.api.referencing.crs.GeographicCRS;
+import org.geotools.api.referencing.crs.ProjectedCRS;
+import org.geotools.api.referencing.operation.TransformException;
 
 import java.io.BufferedInputStream;
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -709,7 +710,13 @@ public class TileWgs84Manager {
             neighborTile = new TileWgs84(null, this);
             neighborTile.setTileIndices(tileIndices);
             neighborTile.setGeographicExtension(TileWgs84Utils.getGeographicExtentOfTileLXY(tileIndices.getL(), tileIndices.getX(), tileIndices.getY(), null, imaginaryType, originIsLeftUp));
-            neighborTile.loadFile(neighborFullPath);
+            try {
+                neighborTile.loadFile(neighborFullPath);
+            } catch (EOFException e) {
+                log.warn("[Tile] Corrupted or incomplete tile file detected: {}. Deleting and will regenerate.", neighborFullPath);
+                new File(neighborFullPath).delete();
+                return null;
+            }
         }
 
         return neighborTile;
@@ -870,5 +877,29 @@ public class TileWgs84Manager {
 
     public boolean originIsLeftUp() {
         return this.originIsLeftUp;
+    }
+
+    /**
+     * Populates the depthGeoTiffFolderPathMap when skipping resize phase.
+     * Scans existing resized directories and maps depth levels to their folder paths.
+     */
+    public void populateDepthMapFromExistingResizedFolders() {
+        int minTileDepth = globalOptions.getMinimumTileDepth();
+        int maxTileDepth = globalOptions.getMaximumTileDepth();
+
+        for (int depth = minTileDepth; depth <= maxTileDepth; depth++) {
+            String depthStr = String.valueOf(depth);
+            String resizedGeoTiffFolderPath = globalOptions.getResizedTiffTempPath() + File.separator + depthStr;
+            File resizedFolder = new File(resizedGeoTiffFolderPath);
+
+            if (resizedFolder.exists() && resizedFolder.isDirectory()) {
+                this.depthGeoTiffFolderPathMap.put(depth, resizedGeoTiffFolderPath);
+                log.debug("[Resize] Mapped depth {} to existing folder: {}", depth, resizedGeoTiffFolderPath);
+            } else {
+                // Fallback to standardization/input path if no resized folder exists for this depth
+                this.depthGeoTiffFolderPathMap.put(depth, globalOptions.getInputPath());
+                log.debug("[Resize] No resized folder for depth {}, using input path: {}", depth, globalOptions.getInputPath());
+            }
+        }
     }
 }

@@ -19,6 +19,7 @@ See: https://github.com/CesiumGS/quantized-mesh
 - Convenient conversion: convert GeoTIFF files without complicated commands.
 - High accuracy: Generate quantized-mesh data with high accuracy.
 - Multiple data conversion: Convert multiple GeoTIFF data at once.
+- Multi-body support: Generate terrain for Earth and Moon with appropriate coordinate reference systems.
 - Customizable options: Provides various customization options such as min/max tile depth, tile raster max size, tile mosaic size, tile generation strength, interpolation method, etc.
 
 ## Usage
@@ -80,6 +81,26 @@ docker pull gaia3d/mago-3d-terrainer
 ```
 docker run --rm -v "/workspace:/workspace" gaia3d/mago-3d-terrainer -input /workspace/geotiff-sample -output /workspace/geotiff-terrain-output -maxDepth 14
 ```
+
+## Celestial Body Support
+mago 3DTerrainer supports terrain generation for multiple celestial bodies:
+- **Earth** (default): Uses WGS84 coordinate system (EPSG:4326) with an ellipsoidal model
+- **Moon**: Uses IAU 2015 coordinate system (IAU:30100) with a spherical model (radius: 1,737.4 km)
+
+Specify the target body using the `-body` or `-b` option:
+
+```bash
+# Generate Earth terrain (default)
+java -jar mago-3d-terrainer.jar -input /earth_data -output /output/earth
+
+# Generate Moon terrain
+java -jar mago-3d-terrainer.jar -input /moon_data -output /output/moon -body moon
+
+# Moon terrain with custom depth and intensity
+java -jar mago-3d-terrainer.jar -input /moon_data -output /output/moon -body moon -max 18 -is 5
+```
+
+The Moon's smaller radius (~27% of Earth) results in smaller tile sizes at the same depth levels. For example, at depth 14, tiles are approximately 3 km on the Moon versus 11 km on Earth.
 
 ## Documentation
 For detailed documentation, including installation and usage instructions, please refer to the official documentation:

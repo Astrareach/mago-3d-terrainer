@@ -3,14 +3,16 @@ package com.gaia3d.command;
 import com.gaia3d.basic.exception.Reporter;
 import com.gaia3d.terrain.types.InterpolationType;
 import com.gaia3d.terrain.types.PriorityType;
+import com.gaia3d.util.CelestialBody;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.io.FileExistsException;
+import org.geotools.referencing.CRS;
 import org.geotools.referencing.crs.DefaultGeographicCRS;
-import org.opengis.referencing.crs.CoordinateReferenceSystem;
+import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
 
 import java.io.File;
 import java.io.IOException;
@@ -39,6 +41,7 @@ public class GlobalOptions {
     private static final double DEFAULT_NO_DATA_VALUE = -9999.0;
     private static final CoordinateReferenceSystem DEFAULT_TARGET_CRS = DefaultGeographicCRS.WGS84;
     private static final TilingSchema DEFAULT_TILING_SCHEMA = TilingSchema.GEODETIC;
+    private static final CelestialBody DEFAULT_CELESTIAL_BODY = CelestialBody.EARTH;
 
     /* Program Information */
     private String version;
@@ -55,6 +58,8 @@ public class GlobalOptions {
     private boolean debugMode = false;
     private boolean leaveTemp = false;
     private boolean isContinue = false;
+    private boolean skipStandardization = false;
+    private boolean skipResize = false;
 
     /* Tiling options */
     private int minimumTileDepth;
@@ -82,6 +87,7 @@ public class GlobalOptions {
     private CoordinateReferenceSystem inputCRS = null;
     private CoordinateReferenceSystem outputCRS;
     private TilingSchema tilingSchema;
+    private CelestialBody celestialBody = DEFAULT_CELESTIAL_BODY;
 
     public static GlobalOptions getInstance() {
         if (instance.javaVersionInfo == null) {
@@ -117,7 +123,31 @@ public class GlobalOptions {
         instance.setDebugMode(command.hasOption(CommandOptions.DEBUG.getLongName()));
         instance.setLeaveTemp(command.hasOption(CommandOptions.LEAVE_TEMP.getLongName()));
         instance.setContinue(command.hasOption(CommandOptions.CONTINUOUS.getLongName()));
-        instance.setOutputCRS(DEFAULT_TARGET_CRS);
+        instance.setSkipStandardization(command.hasOption(CommandOptions.SKIP_STANDARDIZATION.getLongName()));
+        instance.setSkipResize(command.hasOption(CommandOptions.SKIP_RESIZE.getLongName()));
+
+        // Parse celestial body option
+        if (command.hasOption(CommandOptions.BODY.getLongName())) {
+            String bodyValue = command.getOptionValue(CommandOptions.BODY.getLongName());
+            try {
+                instance.setCelestialBody(CelestialBody.fromString(bodyValue));
+            } catch (IllegalArgumentException e) {
+                log.warn("* Invalid celestial body: {}. Defaulting to Earth.", bodyValue);
+                instance.setCelestialBody(DEFAULT_CELESTIAL_BODY);
+            }
+        } else {
+            instance.setCelestialBody(DEFAULT_CELESTIAL_BODY);
+        }
+
+        // Set output CRS based on celestial body
+        try {
+            String crsCode = instance.getCelestialBody().getCrsCode();
+            instance.setOutputCRS(CRS.decode(crsCode));
+            log.debug("Using CRS: {} for {}", crsCode, instance.getCelestialBody().getName());
+        } catch (Exception e) {
+            log.warn("* Failed to decode CRS {}. Falling back to WGS84.", instance.getCelestialBody().getCrsCode(), e);
+            instance.setOutputCRS(DEFAULT_TARGET_CRS);
+        }
 
         // TODO : Add support for input CRS and tiling schema options
         instance.setTilingSchema(DEFAULT_TILING_SCHEMA);
@@ -227,6 +257,8 @@ public class GlobalOptions {
         log.info("Output Path: {}", instance.getOutputPath());
         log.info("Log Path: {}", instance.getLogPath());
         log.info("Layer Json Generate: {}", instance.isLayerJsonGenerate());
+        log.info("Celestial Body: {}", instance.getCelestialBody().getName());
+        log.info("Output CRS: {}", instance.getOutputCRS().getName());
         log.info("Minimum Tile Depth: {}", instance.getMinimumTileDepth());
         log.info("Maximum Tile Depth: {}", instance.getMaximumTileDepth());
         log.info("Tiling Schema: {}", instance.getTilingSchema());
@@ -242,6 +274,7 @@ public class GlobalOptions {
         log.info("Tiling Max Raster Size: {}", instance.getMaxRasterSize());
         log.info("Layer Json Generate: {}", instance.isLayerJsonGenerate());
         log.info("Debug Mode: {}", instance.isDebugMode());
+        log.info("Skip Standardization: {}", instance.isSkipStandardization());
         MagoTerrainerMain.drawLine();
     }
 

@@ -10,8 +10,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.cli.*;
 import org.apache.commons.io.FileUtils;
 import org.apache.logging.log4j.Level;
-import org.opengis.referencing.FactoryException;
-import org.opengis.referencing.operation.TransformException;
+import org.geotools.api.referencing.FactoryException;
+import org.geotools.api.referencing.operation.TransformException;
 
 import java.io.File;
 import java.io.IOException;
@@ -101,13 +101,68 @@ public class MagoTerrainerMain {
 
         TileWgs84Manager tileWgs84Manager = new TileWgs84Manager();
 
-        log.info("[Pre][Standardization] Start GeoTiff Standardization files.");
-        tileWgs84Manager.processStandardizeRasters();
-        log.info("[Pre][Standardization] Finished GeoTiff Standardization files.");
+        if (globalOptions.isSkipStandardization()) {
+            // Check if standardization directory exists and has files
+            File standardizationDir = new File(globalOptions.getStandardizeTempPath());
+            if (standardizationDir.exists() && standardizationDir.isDirectory()) {
+                File[] existingFiles = standardizationDir.listFiles((dir, name) -> name.endsWith(".tif"));
+                if (existingFiles != null && existingFiles.length > 0) {
+                    log.info("[Pre][Standardization] SKIPPED - Using {} existing tiles from: {}",
+                             existingFiles.length, standardizationDir.getAbsolutePath());
 
-        log.info("[Pre][Resize] Start GeoTiff Resizing files.");
-        tileWgs84Manager.processResizeRasters(globalOptions.getInputPath(), null);
-        log.info("[Pre][Resize] Finished GeoTiff Resizing files.");
+                    // Populate the standardized files list (same as processStandardizeRasters does)
+                    tileWgs84Manager.getStandardizedGeoTiffFiles().clear();
+                    for (File file : existingFiles) {
+                        tileWgs84Manager.getStandardizedGeoTiffFiles().add(file);
+                    }
+
+                    // CRITICAL: Update input path to point to standardization directory
+                    // This is what standardizeRasters does at line 760 in TileWgs84Manager
+                    globalOptions.setInputPath(standardizationDir.getAbsolutePath());
+                } else {
+                    log.warn("[Pre][Standardization] Skip requested but no tiles found, running standardization");
+                    log.info("[Pre][Standardization] Start GeoTiff Standardization files.");
+                    tileWgs84Manager.processStandardizeRasters();
+                    log.info("[Pre][Standardization] Finished GeoTiff Standardization files.");
+                }
+            } else {
+                log.warn("[Pre][Standardization] Skip requested but directory doesn't exist, running standardization");
+                log.info("[Pre][Standardization] Start GeoTiff Standardization files.");
+                tileWgs84Manager.processStandardizeRasters();
+                log.info("[Pre][Standardization] Finished GeoTiff Standardization files.");
+            }
+        } else {
+            log.info("[Pre][Standardization] Start GeoTiff Standardization files.");
+            tileWgs84Manager.processStandardizeRasters();
+            log.info("[Pre][Standardization] Finished GeoTiff Standardization files.");
+        }
+
+        // Resize phase, check if skip flag is set
+        if (globalOptions.isSkipResize()) {
+            File resizedFolder = new File(globalOptions.getResizedTiffTempPath() + File.separator + "0");
+            if (resizedFolder.exists() && resizedFolder.isDirectory()) {
+                File[] resizedFiles = resizedFolder.listFiles((dir, name) -> name.toLowerCase().endsWith(".tif"));
+                if (resizedFiles != null && resizedFiles.length > 0) {
+                    log.info("[Pre][Resize] Skipping resize phase - using existing resized files in: {}", resizedFolder.getAbsolutePath());
+                    // Populate the depth map from existing resized folders
+                    tileWgs84Manager.populateDepthMapFromExistingResizedFolders();
+                } else {
+                    log.warn("[Pre][Resize] Skip requested but no .tif files found, running resize");
+                    log.info("[Pre][Resize] Start GeoTiff Resizing files.");
+                    tileWgs84Manager.processResizeRasters(globalOptions.getInputPath(), null);
+                    log.info("[Pre][Resize] Finished GeoTiff Resizing files.");
+                }
+            } else {
+                log.warn("[Pre][Resize] Skip requested but directory doesn't exist, running resize");
+                log.info("[Pre][Resize] Start GeoTiff Resizing files.");
+                tileWgs84Manager.processResizeRasters(globalOptions.getInputPath(), null);
+                log.info("[Pre][Resize] Finished GeoTiff Resizing files.");
+            }
+        } else {
+            log.info("[Pre][Resize] Start GeoTiff Resizing files.");
+            tileWgs84Manager.processResizeRasters(globalOptions.getInputPath(), null);
+            log.info("[Pre][Resize] Finished GeoTiff Resizing files.");
+        }
 
         log.info("[Tile] Start generate terrain elevation data.");
         tileWgs84Manager.setTerrainElevationDataManager(new TerrainElevationDataManager());
@@ -184,6 +239,16 @@ public class MagoTerrainerMain {
                 FileUtils.deleteDirectory(resizedTempFolder);
             } catch (IOException e) {
                 log.error("[Post] Failed to delete resizedTempFolder.", e);
+            }
+        }
+
+        File standardizationTempFolder = new File(globalOptions.getStandardizeTempPath());
+        if (standardizationTempFolder.exists() && standardizationTempFolder.isDirectory()) {
+            try {
+                log.info("[Post] Deleting standardizationTempFolder");
+                FileUtils.deleteDirectory(standardizationTempFolder);
+            } catch (IOException e) {
+                log.error("[Post] Failed to delete standardizationTempFolder.", e);
             }
         }
     }

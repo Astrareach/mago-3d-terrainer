@@ -1,6 +1,8 @@
 package com.gaia3d.terrain.util;
 
+import com.gaia3d.command.GlobalOptions;
 import com.gaia3d.terrain.structure.GeographicExtension;
+import com.gaia3d.util.CelestialBody;
 import com.gaia3d.util.GlobeUtils;
 import org.geotools.coverage.grid.GridCoordinates2D;
 import org.geotools.coverage.grid.GridCoverage2D;
@@ -12,19 +14,21 @@ import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Geometry;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
-import org.opengis.coverage.grid.GridEnvelope;
-import org.opengis.coverage.grid.GridGeometry;
-import org.opengis.geometry.DirectPosition;
-import org.opengis.geometry.Envelope;
-import org.opengis.referencing.FactoryException;
-import org.opengis.referencing.crs.CoordinateReferenceSystem;
-import org.opengis.referencing.operation.MathTransform;
-import org.opengis.referencing.operation.TransformException;
+import org.geotools.api.coverage.grid.GridEnvelope;
+import org.geotools.api.coverage.grid.GridGeometry;
+import org.geotools.api.geometry.Position;
+import org.geotools.api.geometry.Bounds;
+import org.geotools.api.referencing.FactoryException;
+import org.geotools.api.referencing.ReferenceIdentifier;
+import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
+import org.geotools.api.referencing.crs.GeographicCRS;
+import org.geotools.api.referencing.operation.MathTransform;
+import org.geotools.api.referencing.operation.TransformException;
 
 public class GaiaGeoTiffUtils {
     public static Vector2d getLongitudeLatitudeDegree(GridCoverage2D coverage, int coordX, int coordY, GeometryFactory gf, MathTransform targetToWgs) throws TransformException {
         GridCoordinates2D coord = new GridCoordinates2D(coordX, coordY);
-        DirectPosition p = coverage.getGridGeometry().gridToWorld(coord);
+        Position p = coverage.getGridGeometry().gridToWorld(coord);
         Point point = gf.createPoint(new Coordinate(p.getOrdinate(0), p.getOrdinate(1)));
         Geometry wgsP = JTS.transform(point, targetToWgs);
         Point centroid = wgsP.getCentroid();
@@ -42,31 +46,71 @@ public class GaiaGeoTiffUtils {
         return targetToWgs.isIdentity();
     }
 
-    public static void getEnvelopeSpanInMetersOfGridCoverage2D(GridCoverage2D coverage, double[] resultEnvelopeSpanMeters) throws FactoryException {
-        if (isGridCoverage2DWGS84(coverage)) {
-            Envelope envelope = coverage.getEnvelope();
+    private static CelestialBody detectCelestialBody(CoordinateReferenceSystem crs) {
+        try {
+            String crsName = crs.getName().getCode().toLowerCase();
+            String wkt = crs.toWKT();
+
+            // Check for lunar indicators
+            if (crsName.contains("moon") || crsName.contains("lunar") ||
+                wkt.contains("Moon") || wkt.contains("Lunar")) {
+                // Verify by checking for lunar radius (1737400m)
+                if (wkt.contains("1737400")) {
+                    return CelestialBody.MOON;
+                }
+            }
+
+            // Check CRS code identifiers
+            for (ReferenceIdentifier id : crs.getIdentifiers()) {
+                String code = id.getCodeSpace() + ":" + id.getCode();
+                if (code.equals("IAU:30100")) {
+                    return CelestialBody.MOON;
+                }
+                if (code.equals("EPSG:4326")) {
+                    return CelestialBody.EARTH;
+                }
+            }
+
+            // Default to Earth for compatibility
+            return CelestialBody.EARTH;
+        } catch (Exception e) {
+            // Silently default to Earth for backward compatibility
+            return CelestialBody.EARTH;
+        }
+    }
+
+    public static void getBoundsSpanInMetersOfGridCoverage2D(GridCoverage2D coverage, double[] resultBoundsSpanMeters) throws FactoryException {
+        CoordinateReferenceSystem crs = coverage.getCoordinateReferenceSystem2D();
+
+        // Check if CRS is geographic (not just WGS84)
+        if (crs instanceof GeographicCRS) {
+            // Detect celestial body from CRS
+            CelestialBody body = detectCelestialBody(crs);
+
+            Bounds envelope = coverage.getEnvelope();
             double minLat = envelope.getMinimum(1);
             double maxLat = envelope.getMaximum(1);
             double midLat = (minLat + maxLat) / 2.0;
-            double radius = GlobeUtils.getRadiusAtLatitude(midLat);
+
+            // Use radius for detected celestial body
+            double radius = GlobeUtils.getRadiusAtLatitude(midLat, body);
             double degToRadFactor = GlobeUtils.DEGREE_TO_RADIAN_FACTOR;
 
-            Envelope envelopeOriginal = coverage.getEnvelope();
-            // int degrees
-            double envelopeSpanX = envelopeOriginal.getSpan(0);
-            double envelopeSpanY = envelopeOriginal.getSpan(1);
-            resultEnvelopeSpanMeters[0] = (envelopeSpanX * degToRadFactor) * radius;
-            resultEnvelopeSpanMeters[1] = (envelopeSpanY * degToRadFactor) * radius;
+            double envelopeSpanX = envelope.getSpan(0);
+            double envelopeSpanY = envelope.getSpan(1);
+            resultBoundsSpanMeters[0] = (envelopeSpanX * degToRadFactor) * radius;
+            resultBoundsSpanMeters[1] = (envelopeSpanY * degToRadFactor) * radius;
         } else {
-            Envelope envelopeOriginal = coverage.getEnvelope();
-            resultEnvelopeSpanMeters[0] = envelopeOriginal.getSpan(0);
-            resultEnvelopeSpanMeters[1] = envelopeOriginal.getSpan(1);
+            // Projected CRS - already in meters
+            Bounds envelope = coverage.getEnvelope();
+            resultBoundsSpanMeters[0] = envelope.getSpan(0);
+            resultBoundsSpanMeters[1] = envelope.getSpan(1);
         }
     }
 
     public static Vector2d getPixelSizeMeters(GridCoverage2D coverage) throws FactoryException {
         double[] envelopeSpanInMeters = new double[2];
-        getEnvelopeSpanInMetersOfGridCoverage2D(coverage, envelopeSpanInMeters);
+        getBoundsSpanInMetersOfGridCoverage2D(coverage, envelopeSpanInMeters);
         GridGeometry gridGeometry = coverage.getGridGeometry();
         int gridSpanX = gridGeometry.getGridRange().getSpan(0);
         int gridSpanY = gridGeometry.getGridRange().getSpan(1);
@@ -78,7 +122,7 @@ public class GaiaGeoTiffUtils {
     public static GeographicExtension getGeographicExtension(GridCoverage2D coverage, GeometryFactory gf, MathTransform targetToWgs, GeographicExtension resultGeoExtension) throws TransformException {
         // get geographic extension
         GridEnvelope gridRange2D = coverage.getGridGeometry().getGridRange();
-        Envelope envelope = coverage.getEnvelope();
+        Bounds envelope = coverage.getEnvelope();
 
         double minLon = 0.0;
         double minLat = 0.0;
@@ -138,7 +182,7 @@ public class GaiaGeoTiffUtils {
     public static GeographicExtension getGeographicExtension_original(GridCoverage2D coverage, GeometryFactory gf, MathTransform targetToWgs, GeographicExtension resultGeoExtension) throws TransformException {
         // get geographic extension
         GridEnvelope gridRange2D = coverage.getGridGeometry().getGridRange();
-        Envelope envelope = coverage.getEnvelope();
+        Bounds envelope = coverage.getEnvelope();
 
         double minLon = 0.0;
         double minLat = 0.0;

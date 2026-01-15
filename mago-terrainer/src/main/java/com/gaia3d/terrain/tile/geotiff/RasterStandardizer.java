@@ -5,6 +5,7 @@ import it.geosolutions.jaiext.JAIExt;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.geotools.coverage.grid.GridCoverage2D;
+import org.geotools.coverage.grid.GridCoverageFactory;
 import org.geotools.coverage.grid.GridEnvelope2D;
 import org.geotools.coverage.grid.GridGeometry2D;
 import org.geotools.coverage.processing.CoverageProcessor;
@@ -12,14 +13,15 @@ import org.geotools.coverage.processing.Operations;
 import org.geotools.gce.geotiff.GeoTiffReader;
 import org.geotools.gce.geotiff.GeoTiffWriter;
 import org.geotools.geometry.jts.ReferencedEnvelope;
-import org.opengis.coverage.grid.GridEnvelope;
-import org.opengis.coverage.processing.Operation;
-import org.opengis.parameter.ParameterValueGroup;
-import org.opengis.referencing.ReferenceIdentifier;
-import org.opengis.referencing.crs.CoordinateReferenceSystem;
-import org.opengis.referencing.operation.TransformException;
+import org.geotools.api.coverage.grid.GridEnvelope;
+import org.geotools.api.coverage.processing.Operation;
+import org.geotools.api.geometry.Bounds;
+import org.geotools.api.parameter.ParameterValueGroup;
+import org.geotools.api.referencing.ReferenceIdentifier;
+import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
+import org.geotools.api.referencing.operation.TransformException;
 
-import javax.media.jai.Interpolation;
+import org.eclipse.imagen.Interpolation;
 import javax.media.jai.JAI;
 import javax.media.jai.TileCache;
 import javax.media.jai.TileScheduler;
@@ -29,13 +31,18 @@ import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 
 /**
  * RasterStandardizer
@@ -77,9 +84,17 @@ public class RasterStandardizer {
             List<RasterInfo> resampledTiles = pool.submit(() -> splitTiles.parallelStream().map(tile -> {
                         GridCoverage2D gridCoverage2D = tile.getGridCoverage2D();
                         CoordinateReferenceSystem sourceCRS = gridCoverage2D.getCoordinateReferenceSystem();
-                        if (isSameCRS(sourceCRS, targetCRS)) {
+                        boolean sameCRS = isSameCRS(sourceCRS, targetCRS);
+
+                        log.info("[Resample] Source CRS: {}", sourceCRS.getName());
+                        log.info("[Resample] Target CRS: {}", targetCRS.getName());
+                        log.info("[Resample] Same CRS: {}", sameCRS);
+
+                        if (sameCRS) {
+                            log.info("[Resample] Skipping resampling for tile: {}", tile.getName());
                             return tile;
                         } else {
+                            log.info("[Resample] Resampling tile: {} from {} to {}", tile.getName(), sourceCRS.getName(), targetCRS.getName());
                             tile.setGridCoverage2D(resample(gridCoverage2D, targetCRS));
                         }
                         return tile;
@@ -140,9 +155,97 @@ public class RasterStandardizer {
             writer.write(coverage, null);
             writer.dispose();
             outputStream.close();
+        } catch (IllegalArgumentException e) {
+            if (e.getMessage() != null && e.getMessage().contains("Unable to map projection")) {
+                // IAU projection encoding failure, use WorldFile fallback
+                log.warn("[Raster][I/O] GeoTIFF encoding failed for IAU projection, using WorldFile fallback: {}", outputFile.getName());
+                writeGeotiffWithWorldFile(coverage, outputFile);
+            } else {
+                log.error("Failed to write GeoTiff file : {}", outputFile.getAbsolutePath());
+                log.error("Error : ", e);
+            }
         } catch (Exception e) {
             log.error("Failed to write GeoTiff file : {}", outputFile.getAbsolutePath());
             log.error("Error : ", e);
+        }
+    }
+
+    /**
+     * Writes a GeoTIFF with WorldFile sidecar when CRS cannot be encoded internally.
+     * Used for IAU projections that GeoTIFF format doesn't support.
+     *
+     * @param coverage GridCoverage2D to write
+     * @param outputFile Output GeoTIFF file path
+     */
+    private void writeGeotiffWithWorldFile(GridCoverage2D coverage, File outputFile) {
+        try {
+            // Extract geotransformation parameters FIRST (needed for WorldFile)
+            GridGeometry2D gridGeometry = coverage.getGridGeometry();
+            Bounds envelope = coverage.getEnvelope();
+            GridEnvelope gridRange = gridGeometry.getGridRange();
+
+            double minX = envelope.getMinimum(0);
+            double maxY = envelope.getMaximum(1);
+
+            // Step 1: Get raw image data from coverage
+            RenderedImage image = coverage.getRenderedImage();
+
+            // Step 2: Write TIFF using JAI ImageWriter (no CRS validation, proper stream handling)
+            Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("TIFF");
+            if (!writers.hasNext()) {
+                throw new IOException("No TIFF ImageWriter found");
+            }
+
+            ImageWriter imageWriter = writers.next();
+            try (ImageOutputStream ios = ImageIO.createImageOutputStream(outputFile)) {
+                imageWriter.setOutput(ios);
+                imageWriter.write(image);
+                ios.flush();
+            } finally {
+                imageWriter.dispose();
+            }
+
+            // Step 3: Write WorldFile (.tfw)
+            File worldFile = new File(
+                outputFile.getParentFile(),
+                outputFile.getName().replace(".tif", ".tfw")
+            );
+
+            // Calculate WorldFile parameters
+            int width = gridRange.getSpan(0);
+            int height = gridRange.getSpan(1);
+
+            double pixelSizeX = envelope.getSpan(0) / width;
+            double pixelSizeY = -envelope.getSpan(1) / height; // Negative for north-up
+            double upperLeftX = minX + (pixelSizeX / 2.0); // Center of pixel
+            double upperLeftY = maxY + (pixelSizeY / 2.0);
+
+            // Write WorldFile (6 lines)
+            try (PrintWriter tfwWriter = new PrintWriter(worldFile)) {
+                tfwWriter.println(String.format(Locale.US, "%.10f", pixelSizeX));    // Line 1
+                tfwWriter.println("0.0");                                              // Line 2 (rotation)
+                tfwWriter.println("0.0");                                              // Line 3 (rotation)
+                tfwWriter.println(String.format(Locale.US, "%.10f", pixelSizeY));    // Line 4
+                tfwWriter.println(String.format(Locale.US, "%.10f", upperLeftX));    // Line 5
+                tfwWriter.println(String.format(Locale.US, "%.10f", upperLeftY));    // Line 6
+            }
+
+            // Step 4: Write CRS to separate .prj file
+            File prjFile = new File(
+                outputFile.getParentFile(),
+                outputFile.getName().replace(".tif", ".prj")
+            );
+            try (PrintWriter prjWriter = new PrintWriter(prjFile)) {
+                prjWriter.println(coverage.getCoordinateReferenceSystem().toWKT());
+            }
+
+            log.info("[Raster][WorldFile] Wrote GeoTIFF with WorldFile fallback: {}", outputFile.getName());
+            log.debug("  -> Created valid TIFF with .tfw and .prj sidecar files for IAU projection");
+
+        } catch (Exception e) {
+            log.error("Failed to write GeoTiff with WorldFile : {}", outputFile.getAbsolutePath());
+            log.error("Error : ", e);
+            throw new RuntimeException("WorldFile write failed", e);
         }
     }
 
@@ -235,14 +338,59 @@ public class RasterStandardizer {
     }
 
     public boolean isSameCRS(CoordinateReferenceSystem sourceCRS, CoordinateReferenceSystem targetCRS) {
+        // Quick check: if they're the exact same object
+        if (sourceCRS == targetCRS) {
+            return true;
+        }
+
+        // First, try comparing by identifier (authority + code)
         Iterator<ReferenceIdentifier> sourceCRSIterator = sourceCRS.getIdentifiers().iterator();
         Iterator<ReferenceIdentifier> targetCRSIterator = targetCRS.getIdentifiers().iterator();
 
         if (sourceCRSIterator.hasNext() && targetCRSIterator.hasNext()) {
-            String sourceCRSCode = sourceCRSIterator.next().getCode();
-            String targetCRSCode = targetCRSIterator.next().getCode();
-            return sourceCRSCode.equals(targetCRSCode);
-        } else {
+            ReferenceIdentifier sourceId = sourceCRSIterator.next();
+            ReferenceIdentifier targetId = targetCRSIterator.next();
+
+            // Check both authority and code (important for IAU vs EPSG)
+            String sourceAuthority = sourceId.getCodeSpace();
+            String targetAuthority = targetId.getCodeSpace();
+            String sourceCode = sourceId.getCode();
+            String targetCode = targetId.getCode();
+
+            if (sourceAuthority != null && targetAuthority != null) {
+                boolean matches = sourceAuthority.equals(targetAuthority) && sourceCode.equals(targetCode);
+                if (matches) {
+                    return true;
+                }
+            } else if (sourceCode.equals(targetCode)) {
+                return true;
+            }
+        }
+
+        // Fallback: use GeoTools CRS comparison (ignores metadata like name)
+        // This handles cases where CRS names differ but definitions are equivalent
+        try {
+            boolean equals = org.geotools.referencing.CRS.equalsIgnoreMetadata(sourceCRS, targetCRS);
+            if (!equals) {
+                // Additional check for IAU lunar CRS, if both refer to Moon with same datum, consider them equal
+                String sourceName = sourceCRS.getName().getCode();
+                String targetName = targetCRS.getName().getCode();
+                if ((sourceName.contains("Moon") || sourceName.contains("Lunar")) &&
+                    (targetName.contains("Moon") || targetName.contains("Lunar"))) {
+                    // Both are lunar CRSs, compare WKT to be sure
+                    String sourceWKT = sourceCRS.toWKT();
+                    String targetWKT = targetCRS.toWKT();
+                    // Check if both have same spheroid (1737400m for Moon)
+                    boolean sameSphere = sourceWKT.contains("1737400") && targetWKT.contains("1737400");
+                    if (sameSphere) {
+                        log.info("[CRS] Both are IAU lunar CRSs with same datum, treating as equal");
+                        return true;
+                    }
+                }
+            }
+            return equals;
+        } catch (Exception e) {
+            log.warn("Failed to compare CRS, assuming different: {}", e.getMessage());
             return false;
         }
     }

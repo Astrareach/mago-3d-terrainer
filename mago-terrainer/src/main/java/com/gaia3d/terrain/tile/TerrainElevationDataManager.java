@@ -16,10 +16,10 @@ import org.geotools.coverage.grid.GridCoverage2D;
 import org.geotools.referencing.CRS;
 import org.joml.Vector2d;
 import org.locationtech.jts.geom.GeometryFactory;
-import org.opengis.referencing.FactoryException;
-import org.opengis.referencing.crs.CoordinateReferenceSystem;
-import org.opengis.referencing.operation.MathTransform;
-import org.opengis.referencing.operation.TransformException;
+import org.geotools.api.referencing.FactoryException;
+import org.geotools.api.referencing.crs.CoordinateReferenceSystem;
+import org.geotools.api.referencing.operation.MathTransform;
+import org.geotools.api.referencing.operation.TransformException;
 
 import java.io.File;
 import java.io.IOException;
@@ -289,8 +289,21 @@ public class TerrainElevationDataManager {
             terrainElevationData.setGeotiffFileName(geoTiffFileName);
 
             crsTarget = gridCoverage2D.getCoordinateReferenceSystem2D();
-            crsWgs84 = CRS.decode("EPSG:4326", true);
-            targetToWgs = CRS.findMathTransform(crsTarget, crsWgs84);
+            // Use configured output CRS (supports both Earth EPSG:4326 and Moon IAU:30100)
+            crsWgs84 = GlobalOptions.getInstance().getOutputCRS();
+
+            // Check if both CRS are equivalent (same celestial body)
+            try {
+                targetToWgs = CRS.findMathTransform(crsTarget, crsWgs84, true); // lenient=true
+            } catch (Exception e) {
+                // Fallback: check if both are lunar or both use same spheroid
+                if (areCRSEquivalent(crsTarget, crsWgs84)) {
+                    log.debug("[CRS] Both CRS are for same celestial body, using identity transform");
+                    targetToWgs = org.geotools.referencing.operation.transform.IdentityTransform.create(2);
+                } else {
+                    throw e;
+                }
+            }
 
             GaiaGeoTiffUtils.getGeographicExtension(gridCoverage2D, gf, targetToWgs, terrainElevationData.getGeographicExtension());
             terrainElevationData.setPixelSizeMeters(GaiaGeoTiffUtils.getPixelSizeMeters(gridCoverage2D));
@@ -364,6 +377,45 @@ public class TerrainElevationDataManager {
         if (myGaiaGeoTiffManager != null) {
             myGaiaGeoTiffManager.deleteObjects();
             myGaiaGeoTiffManager = null;
+        }
+    }
+
+    /**
+     * Checks if two CRS are for the same celestial body by comparing spheroid radius.
+     * Used to avoid transformation errors when both CRS reference the same body (e.g., Moon)
+     * but GeoTools doesn't have transformation parameters between them.
+     *
+     * @param crs1 First coordinate reference system
+     * @param crs2 Second coordinate reference system
+     * @return true if both CRS are for the same celestial body
+     */
+    private boolean areCRSEquivalent(CoordinateReferenceSystem crs1, CoordinateReferenceSystem crs2) {
+        try {
+            String wkt1 = crs1.toWKT();
+            String wkt2 = crs2.toWKT();
+
+            // Check for Moon indicators
+            boolean isMoon1 = wkt1.contains("Moon") || wkt1.contains("Lunar") || wkt1.contains("1737400");
+            boolean isMoon2 = wkt2.contains("Moon") || wkt2.contains("Lunar") || wkt2.contains("1737400");
+
+            if (isMoon1 && isMoon2) {
+                log.info("[CRS] Both CRS are for Moon - treating as equivalent");
+                return true;
+            }
+
+            // Check for Earth indicators (both should be Earth)
+            boolean isEarth1 = wkt1.contains("WGS") || wkt1.contains("6378137"); // WGS84 radius
+            boolean isEarth2 = wkt2.contains("WGS") || wkt2.contains("6378137");
+
+            if (isEarth1 && isEarth2) {
+                // For Earth, let GeoTools handle the transformation normally
+                return false;
+            }
+
+            return false;
+        } catch (Exception e) {
+            log.warn("[CRS] Could not compare CRS: {}", e.getMessage());
+            return false;
         }
     }
 }

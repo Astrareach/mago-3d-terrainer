@@ -33,6 +33,22 @@ java -jar mago-3d-terrainer.jar -input "/input_path/geotiff_folder" -output "/ou
 java -jar mago-3d-terrainer.jar -input "/input_path/geotiff_folder" -output "/output_path/terrain_tiles_output" -it nearest
 ```
 
+### 천체 선택
+```-body <value>``` 또는 ```-b <value>``` 옵션을 사용하여 다른 천체에 대한 지형을 생성할 수 있습니다.
+현재 지원되는 천체: ```earth``` (기본값) 및 ```moon```
+
+달은 IAU 2015 좌표 참조 시스템(IAU:30100)을 사용하며 평균 반지름은 1,737.4km로 지구 반지름의 약 27%입니다. 이로 인해 동일한 깊이 수준에서 타일 크기가 더 작아집니다.
+
+달 지형 생성 예시:
+```
+java -jar mago-3d-terrainer.jar -input "/moon_data/geotiff_folder" -output "/output/moon_terrain" -body moon
+```
+
+추가 옵션을 사용한 예시:
+```
+java -jar mago-3d-terrainer.jar -input "/moon_data/geotiff_folder" -output "/output/moon_terrain" -body moon -max 18 -intensity 5
+```
+
 ### Terrain Normal 계산 (Lighting)
 ```-calculateNormals``` 또는 ```-cn``` 옵션을 통해 Terrain Tiles의 normal을 계산할 수 있습니다.
 기본값은 ```false```이며, normal을 계산하면 변환 시간이 증가할 수 있으나 광원효과를 사용할 수 있습니다.

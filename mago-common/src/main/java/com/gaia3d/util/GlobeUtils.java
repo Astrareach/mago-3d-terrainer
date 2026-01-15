@@ -10,10 +10,10 @@ import org.locationtech.proj4j.BasicCoordinateTransform;
 import org.locationtech.proj4j.CRSFactory;
 import org.locationtech.proj4j.CoordinateReferenceSystem;
 import org.locationtech.proj4j.ProjCoordinate;
-import org.opengis.referencing.FactoryException;
-import org.opengis.referencing.ReferenceIdentifier;
-import org.opengis.referencing.operation.MathTransform;
-import org.opengis.referencing.operation.TransformException;
+import org.geotools.api.referencing.FactoryException;
+import org.geotools.api.referencing.ReferenceIdentifier;
+import org.geotools.api.referencing.operation.MathTransform;
+import org.geotools.api.referencing.operation.TransformException;
 
 import java.util.List;
 
@@ -32,6 +32,10 @@ public class GlobeUtils {
     public static final CoordinateReferenceSystem wgs84 = factory.createFromParameters("WGS84", "+proj=longlat +datum=WGS84 +no_defs");
 
     public static double[] geographicToCartesianWgs84(double longitude, double latitude, double altitude) {
+        return geographicToCartesian(longitude, latitude, altitude, CelestialBody.EARTH);
+    }
+
+    public static double[] geographicToCartesian(double longitude, double latitude, double altitude, CelestialBody body) {
         double[] result = new double[3];
         double lonRad = longitude * DEGREE_TO_RADIAN_FACTOR;
         double latRad = latitude * DEGREE_TO_RADIAN_FACTOR;
@@ -39,8 +43,9 @@ public class GlobeUtils {
         double cosLat = Math.cos(latRad);
         double sinLon = Math.sin(lonRad);
         double sinLat = Math.sin(latRad);
-        double e2 = FIRST_ECCENTRICITY_SQUARED;
-        double v = EQUATORIAL_RADIUS / Math.sqrt(1.0 - e2 * sinLat * sinLat);
+        double e2 = body.getFirstEccentricitySquared();
+        double equatorialRadius = body.getEquatorialRadius();
+        double v = equatorialRadius / Math.sqrt(1.0 - e2 * sinLat * sinLat);
         result[0] = (v + altitude) * cosLat * cosLon;
         result[1] = (v + altitude) * cosLat * sinLon;
         result[2] = (v * (1.0 - e2) + altitude) * sinLat;
@@ -48,14 +53,14 @@ public class GlobeUtils {
     }
 
     public static double radiusAtLatitudeRad(double latRad) {
-        double cosLat = Math.cos(latRad);
+        return radiusAtLatitudeRad(latRad, CelestialBody.EARTH);
+    }
+
+    public static double radiusAtLatitudeRad(double latRad, CelestialBody body) {
         double sinLat = Math.sin(latRad);
-        /*
-        double numerator = Math.pow(EARTH_RADIUS_EQUATOR * cosLat, 2) + Math.pow(EARTH_RADIUS_POLAR * sinLat, 2);
-        double denominator = Math.pow(EARTH_RADIUS_EQUATOR * cosLat, 2) + Math.pow(EARTH_RADIUS_POLAR * sinLat, 2);
-        return Math.sqrt(numerator / denominator);
-         */
-        return EQUATORIAL_RADIUS / Math.sqrt(1.0 - FIRST_ECCENTRICITY_SQUARED * sinLat * sinLat);
+        double e2 = body.getFirstEccentricitySquared();
+        double equatorialRadius = body.getEquatorialRadius();
+        return equatorialRadius / Math.sqrt(1.0 - e2 * sinLat * sinLat);
     }
 
     public static double distanceBetweenLatitudesRad(double minLatRad, double maxLatRad) {
@@ -124,7 +129,13 @@ public class GlobeUtils {
     }
 
     public static Vector3d normalAtCartesianPointWgs84(double x, double y, double z) {
-        Vector3d zAxis = new Vector3d(x / EQUATORIAL_RADIUS_SQUARED, y / EQUATORIAL_RADIUS_SQUARED, z / POLAR_RADIUS_SQUARED);
+        return normalAtCartesianPoint(x, y, z, CelestialBody.EARTH);
+    }
+
+    public static Vector3d normalAtCartesianPoint(double x, double y, double z, CelestialBody body) {
+        double equatorialRadiusSquared = body.getEquatorialRadiusSquared();
+        double polarRadiusSquared = body.getPolarRadiusSquared();
+        Vector3d zAxis = new Vector3d(x / equatorialRadiusSquared, y / equatorialRadiusSquared, z / polarRadiusSquared);
         zAxis.normalize();
         return zAxis;
     }
@@ -138,15 +149,15 @@ public class GlobeUtils {
     }
 
     public static Vector3d cartesianToGeographicWgs84(Vector3d position) {
-        double x = position.x;
-        double y = position.y;
-        double z = position.z;
+        return cartesianToGeographic(position.x, position.y, position.z, CelestialBody.EARTH);
+    }
 
+    public static Vector3d cartesianToGeographic(double x, double y, double z, CelestialBody body) {
         double xxpyy = x * x + y * y;
         double sqrtXXpYY = Math.sqrt(xxpyy);
-        double a = EQUATORIAL_RADIUS;
+        double a = body.getEquatorialRadius();
         double ra2 = 1.0 / (a * a);
-        double e2 = FIRST_ECCENTRICITY_SQUARED;
+        double e2 = body.getFirstEccentricitySquared();
         double e4 = e2 * e2;
         double p = xxpyy * ra2;
         double q = z * z * (1.0 - e2) * ra2;
@@ -207,9 +218,9 @@ public class GlobeUtils {
         return transformer.transform(coordinate, new ProjCoordinate());
     }
 
-    public static Coordinate transformOnGeotools(org.opengis.referencing.crs.CoordinateReferenceSystem source, Coordinate coordinate) {
+    public static Coordinate transformOnGeotools(org.geotools.api.referencing.crs.CoordinateReferenceSystem source, Coordinate coordinate) {
         try {
-            org.opengis.referencing.crs.CoordinateReferenceSystem wgs84 = CRS.decode("EPSG:4326");
+            org.geotools.api.referencing.crs.CoordinateReferenceSystem wgs84 = CRS.decode("EPSG:4326");
 
             MathTransform transform = CRS.findMathTransform(source, wgs84, false);
             return JTS.transform(coordinate, coordinate, transform);
@@ -220,13 +231,18 @@ public class GlobeUtils {
     }
 
     public static double getRadiusAtLatitude(double latitude) {
-        double latRad = latitude * DEGREE_TO_RADIAN_FACTOR;
-        double sinLat = Math.sin(latRad);
-        double e2 = FIRST_ECCENTRICITY_SQUARED;
-        return EQUATORIAL_RADIUS / Math.sqrt(1.0 - e2 * sinLat * sinLat);
+        return getRadiusAtLatitude(latitude, CelestialBody.EARTH);
     }
 
-    public static org.opengis.referencing.crs.CoordinateReferenceSystem convertWkt(String wkt) {
+    public static double getRadiusAtLatitude(double latitude, CelestialBody body) {
+        double latRad = latitude * DEGREE_TO_RADIAN_FACTOR;
+        double sinLat = Math.sin(latRad);
+        double e2 = body.getFirstEccentricitySquared();
+        double equatorialRadius = body.getEquatorialRadius();
+        return equatorialRadius / Math.sqrt(1.0 - e2 * sinLat * sinLat);
+    }
+
+    public static org.geotools.api.referencing.crs.CoordinateReferenceSystem convertWkt(String wkt) {
         try {
             return CRS.parseWKT(wkt);
         } catch (FactoryException e) {
@@ -253,7 +269,7 @@ public class GlobeUtils {
         }
     }
 
-    public static CoordinateReferenceSystem convertProj4jCrsFromGeotoolsCrs(org.opengis.referencing.crs.CoordinateReferenceSystem crs) {
+    public static CoordinateReferenceSystem convertProj4jCrsFromGeotoolsCrs(org.geotools.api.referencing.crs.CoordinateReferenceSystem crs) {
         String epsg = null;
         List<ReferenceIdentifier> identifiers =  crs.getIdentifiers().stream().toList();
         if (!identifiers.isEmpty()) {

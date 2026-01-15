@@ -3,7 +3,7 @@ import com.github.jengelman.gradle.plugins.shadow.transformers.AppendingTransfor
 plugins {
     id "java"
     id "com.google.cloud.tools.jib" version "3.4.0"
-    id 'com.github.johnrengelman.shadow' version '8.1.0'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 repositories {
@@ -12,6 +12,8 @@ repositories {
 }
 
 dependencies {
+    implementation project(':mago-common')
+
     compileOnly "org.projectlombok:lombok:1.18.30"
     annotationProcessor "org.projectlombok:lombok:1.18.30"
 
@@ -30,13 +32,21 @@ dependencies {
     implementation "org.locationtech.proj4j:proj4j:1.2.3"
     implementation "org.locationtech.proj4j:proj4j-epsg:1.2.3"
 
-    implementation "org.geotools:gt-geotiff:26.5"
-    implementation 'org.geotools:gt-geojsondatastore:26.5'
-    implementation "org.geotools:gt-referencing:26.5"
-    implementation "org.geotools:gt-epsg-wkt:26.5"
-    implementation "org.geotools:gt-coverage:26.5"
-    implementation "org.geotools:gt-main:26.5"
-    implementation "org.geotools:gt-image:26.5"
+    implementation "org.geotools:gt-geotiff:34.1"
+    implementation 'org.geotools:gt-geojson-store:34.1'
+    implementation "org.geotools:gt-referencing:34.1"
+    implementation "org.geotools:gt-epsg-wkt:34.1"
+    implementation "org.geotools:gt-iau-wkt:34.1"
+    implementation "org.geotools:gt-coverage:34.1"
+    implementation "org.geotools:gt-main:34.1"
+    implementation "org.geotools:gt-image:34.1"
+
+    // JAI-EXT dependencies (required by gt-coverage for NoDataContainer)
+    implementation "it.geosolutions.jaiext.utilities:jt-utilities:1.0.15"
+
+    // XML parser dependencies to resolve SAXNotRecognizedException
+    implementation "xerces:xercesImpl:2.12.2"
+    implementation "xml-apis:xml-apis:1.4.01"
 
     // add shaded dependencies
     implementation "javax.media:jai_core:1.1.3"
@@ -139,6 +149,9 @@ shadowJar {
     transform(AppendingTransformer) {
         resource = "META-INF/registryFile.jaiext"
     }
+    transform(AppendingTransformer) {
+        resource = "META-INF/registryFile.imagen"
+    }
 
     manifest {
         attributes 'Main-Class': 'com.gaia3d.command.MagoTerrainerMain'
@@ -148,7 +161,8 @@ shadowJar {
         attributes 'Implementation-Vendor-Id': 'com.gaia3d'
         attributes 'Implementation-URL': 'http://java.sun.com/products/java-media/jai/forDevelopers/jai-imageio/'
     }
-    relocate 'org.slf4j', 'shadow.slf4j'
+    // Temporarily disabled due to Java 22 bytecode in GeoTools 34.1 dependencies
+    // relocate 'org.slf4j', 'shadow.slf4j'
     archiveFileName = "mago-3d-terrainer-${project.version}.jar"
     destinationDirectory.set(file("${projectDir}/dist"))
     duplicatesStrategy = DuplicatesStrategy.INCLUDE

@@ -11,6 +11,9 @@ public enum CommandOptions {
     LEAVE_TEMP("leaveTemp", "lt", false, "Leave temporary files for debugging"),
     JSON("json", "j", false, "Generate layer.json from terrain data"),
     CONTINUOUS("continue", "c", false, "Continue from last terrain generation. This option can be used when terrain creation is interrupted or fails."),
+    SKIP_STANDARDIZATION("skipStandardization", "ss", false, "Skip standardization phase if tiles already exist in standardization directory"),
+    SKIP_RESIZE("skipResize", "sr", false, "Skip resize phase if tiles already exist in resized directory"),
+    BODY("body", "b", true, "Celestial body [earth, moon][default : earth]"),
 
     /* Path Options */
     INPUT("input", "i", true, "[Required] Input directory path"),

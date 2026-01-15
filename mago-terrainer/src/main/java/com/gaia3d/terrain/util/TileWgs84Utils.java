@@ -18,7 +18,8 @@ public class TileWgs84Utils {
     public static double getTileSizeInMetersByDepth(int depth) {
         double angDeg = TileWgs84Utils.selectTileAngleRangeByDepth(depth);
         double angRad = angDeg * Math.PI / 180.0;
-        return angRad * GlobeUtils.EQUATORIAL_RADIUS;
+        double equatorialRadius = globalOptions.getCelestialBody().getEquatorialRadius();
+        return angRad * equatorialRadius;
     }
 
     public static void clampVerticesInToTile(TerrainMesh mesh, TileIndices tileIndices, String imaginaryType, boolean originIsLeftUp) {

@@ -19,6 +19,7 @@ OCG의 표준 포맷인 GeoTIFF 파일을 공간정보 레스터 데이터를 �
 - 편리한 변환: GeoTIFF 파일을 복잡한 커맨드 없이 변환할 수 있습니다.
 - 높은 정확도: 높은 정확도의 quantized-mesh 데이터를 생성합니다.
 - 다수의 데이터 변환: 다수의 GeoTIFF 데이터를 한 번에 변환할 수 있습니다.
+- 다중 천체 지원: 지구와 달에 대한 지형 생성을 적절한 좌표 참조 시스템으로 지원합니다.
 - 상세옵션 조절: 최소/최대 타일 깊이, 타일 레스터 최대 크기, 타일 모자이크 크기, 타일생성 강도, 보간방법 등 다양한 상세옵션을 제공합니다.
 
 ## 사용법
@@ -80,6 +81,31 @@ docker pull gaia3d/mago-3d-terrainer
 ```
 docker run --rm -v "/workspace:/workspace" gaia3d/mago-3d-terrainer -input /workspace/geotiff-sample -output /workspace/geotiff-terrain-output -maxDepth 14
 ```
+
+## 천체 지원
+mago 3DTerrainer는 여러 천체에 대한 지형 생성을 지원합니다:
+- **지구** (기본값): WGS84 좌표계(EPSG:4326)를 사용하는 타원체 모델
+- **달**: IAU 2015 좌표계(IAU:30100)를 사용하는 구형 모델 (반지름: 1,737.4 km)
+
+`-body` 또는 `-b` 옵션을 사용하여 대상 천체를 지정합니다:
+
+```bash
+# 지구 지형 생성 (기본값)
+java -jar mago-3d-terrainer.jar -input /earth_data -output /output/earth
+
+# 달 지형 생성
+java -jar mago-3d-terrainer.jar -input /moon_data -output /output/moon -body moon
+
+# 사용자 정의 깊이 및 강도를 가진 달 지형
+java -jar mago-3d-terrainer.jar -input /moon_data -output /output/moon -body moon -max 18 -is 5
+```
+
+달의 작은 반지름(지구의 약 27%)은 동일한 깊이 수준에서 더 작은 타일 크기를 생성합니다. 예를 들어, 깊이 14에서 타일은 달에서 약 3km, 지구에서 약 11km입니다.
+
+## 문서
+자세한 문서는 공식 문서를 참조하세요:
+- JavaDocs : [gaia3d.github.io/mago-3d-terrainer](https://gaia3d.github.io/mago-3d-terrainer)
+- 매뉴얼 : [github.com/Gaia3D/mago-3d-terrainer](https://github.com/Gaia3D/mago-3d-terrainer/blob/main/MANUAL.ko.md)
 
 ## 지원하는 자바 버전
 JDK17, JDK21 등 LTS(Long-term support)버전 JDK를 지원합니다.

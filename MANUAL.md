@@ -33,6 +33,22 @@ Currently, two methods are available: ```nearest``` and ```bilinear```, with the
 java -jar mago-3d-terrainer.jar -input "/input_path/geotiff_folder" -output "/output_path/terrain_tiles_output" -it nearest
 ```
 
+### Select Celestial Body
+You can generate terrain for different celestial bodies using the ```-body <value>``` or ```-b <value>``` option.
+Currently supported bodies: ```earth``` (default) and ```moon```.
+
+The Moon uses the IAU 2015 coordinate reference system (IAU:30100) with a mean radius of 1,737.4 km, which is approximately 27% of Earth's radius. This results in smaller tile sizes at the same depth levels.
+
+Example for Moon terrain generation:
+```
+java -jar mago-3d-terrainer.jar -input "/moon_data/geotiff_folder" -output "/output/moon_terrain" -body moon
+```
+
+Example with additional options:
+```
+java -jar mago-3d-terrainer.jar -input "/moon_data/geotiff_folder" -output "/output/moon_terrain" -body moon -max 18 -intensity 5
+```
+
 ### Calculate Terrain Normal (Lighting)
 The ```-calculateNormals``` or ```-cn``` options allow you to calculate the normals for Terrain Tiles.
 The default is ```false```, which allows you to use lighting effects, although calculating normals may increase conversion time.

@@ -10,8 +10,8 @@ repositories {
 dependencies {
     implementation "org.locationtech.proj4j:proj4j:1.2.3"
     implementation "org.locationtech.proj4j:proj4j-epsg:1.2.3"
-    implementation 'org.geotools:gt-geojson:26.5'
-    implementation 'org.geotools:gt-geojsondatastore:26.5'
+    implementation 'org.geotools:gt-geojson-core:34.1'
+    implementation 'org.geotools:gt-geojson-store:34.1'
 }
 
 javadoc {

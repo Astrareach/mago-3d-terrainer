@@ -10,7 +10,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.joml.Vector3d;
-import org.opengis.referencing.operation.TransformException;
+import org.geotools.api.referencing.operation.TransformException;
 
 import java.io.*;
 import java.util.ArrayList;
@@ -77,11 +77,10 @@ public class TileWgs84 {
     }
 
     public void loadFile(String filePath) throws IOException {
-        BigEndianDataInputStream dataInputStream = new BigEndianDataInputStream(new BufferedInputStream(new FileInputStream(filePath)));
-
-        this.mesh = new TerrainMesh();
-        this.mesh.loadDataInputStream(dataInputStream);
-        dataInputStream.close();
+        try (BigEndianDataInputStream dataInputStream = new BigEndianDataInputStream(new BufferedInputStream(new FileInputStream(filePath)))) {
+            this.mesh = new TerrainMesh();
+            this.mesh.loadDataInputStream(dataInputStream);
+        }
     }
 
     public void createInitialMesh() throws TransformException, IOException {
